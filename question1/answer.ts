@@ -46,6 +46,7 @@ interface Car {
   ];
 
 
+//Realised I was in the wrong exam project, so this is the same in EDA exam.
 function getMatches<T>(data: T[], criteria: (item: T) => boolean): T[] {
     return data.filter(criteria);
 } //Generic search function
