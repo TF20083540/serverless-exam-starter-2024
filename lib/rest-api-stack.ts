@@ -27,10 +27,24 @@ export class RestAPIStack extends cdk.Stack {
       removalPolicy: cdk.RemovalPolicy.DESTROY,
       tableName: "MovieCast",
     });
+    
 
     movieCastsTable.addLocalSecondaryIndex({
       indexName: "roleIx",
       sortKey: { name: "roleName", type: dynamodb.AttributeType.STRING },
+    });
+
+    const movieCrewTable = new dynamodb.Table(this, "MovieCrewTable", {
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      partitionKey: { name: "movieId", type: dynamodb.AttributeType.NUMBER },
+      sortKey: { name: "crewRole", type: dynamodb.AttributeType.STRING },
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      tableName: "MovieCrew",
+    });
+
+    movieCrewTable.addLocalSecondaryIndex({
+      indexName: "roleIx",
+      sortKey: { name: "crewRole", type: dynamodb.AttributeType.STRING },
     });
 
     const movieAwardsTable = new dynamodb.Table(this, "MovieAwardsTable", {
@@ -41,13 +55,7 @@ export class RestAPIStack extends cdk.Stack {
       tableName: "MovieAwards",
     });
 
-    const movieCrewTable = new dynamodb.Table(this, "MovieCrewTable", {
-      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
-      partitionKey: { name: "movieId", type: dynamodb.AttributeType.NUMBER },
-      sortKey: { name: "crewRole", type: dynamodb.AttributeType.STRING },
-      removalPolicy: cdk.RemovalPolicy.DESTROY,
-      tableName: "MovieCrew",
-    });
+
 
     // Functions
     const getMovieByIdFn = new lambdanode.NodejsFunction(
@@ -99,6 +107,23 @@ export class RestAPIStack extends cdk.Stack {
       }
     );
 
+    //New lambda function for Crew
+    const getMovieCrewMembersFn = new lambdanode.NodejsFunction(
+      this,
+      "GetCrewMemberFn",
+      {
+        architecture: lambda.Architecture.ARM_64,
+        runtime: lambda.Runtime.NODEJS_18_X,
+        entry: `${__dirname}/../lambdas/getMovieCrew.ts`,
+        timeout: cdk.Duration.seconds(10),
+        memorySize: 128,
+        environment: {
+          TABLE_NAME: movieCrewTable.tableName,
+          REGION: "eu-west-1",
+        },
+      }
+    );
+
     new custom.AwsCustomResource(this, "moviesddbInitData", {
       onCreate: {
         service: "DynamoDB",
@@ -141,11 +166,15 @@ export class RestAPIStack extends cdk.Stack {
     const moviesEndpoint = api.root.addResource("movies");
 
     const movieEndpoint = moviesEndpoint.addResource("{movieId}");
-
     movieEndpoint.addMethod(
       "GET",
       new apig.LambdaIntegration(getMovieByIdFn, { proxy: true })
     );
+
+    movieEndpoint.addMethod(
+      "DELETE",
+      new apig.LambdaIntegration(deleteMovieByIdFn, { proxy: true })
+    );    
 
     const movieCastEndpoint = movieEndpoint.addResource("cast");
     movieCastEndpoint.addMethod(
@@ -153,15 +182,23 @@ export class RestAPIStack extends cdk.Stack {
       new apig.LambdaIntegration(getMovieCastMembersFn, { proxy: true })
     );
 
-    movieEndpoint.addMethod(
-      "DELETE",
-      new apig.LambdaIntegration(deleteMovieByIdFn, { proxy: true })
-    );
+    const movieCrewEndpoint = movieEndpoint.addResource("crew");
+    movieCrewEndpoint.addMethod(
+      "GET", 
+      new apig.LambdaIntegration(getMovieCrewMembersFn, {proxy: true})
+    )
+
+
 
     // Permissions;
     moviesTable.grantReadData(getMovieByIdFn);
     moviesTable.grantReadWriteData(deleteMovieByIdFn);
     movieCastsTable.grantReadData(getMovieCastMembersFn);
     movieCastsTable.grantReadData(getMovieByIdFn);
+    movieCrewTable.grantReadData(getMovieCrewMembersFn);
   }
+
+  //Missing Authentication Token error.
+  //Get the same error by doing a different order -> /movies/1234/crew/director
+  //While this order (sans role -> /movies/1234/crew )  Message	"Missing movie Id or role"
 }
